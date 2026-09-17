@@ -161,3 +161,26 @@ string>` (a mini DNS cache) to show it is not int-only.
 Every `new` has a matching `delete`: evicted nodes are freed in `put`, and the
 destructor `~Cache()` frees all survivors (including sentinels) at shutdown,
 so nothing leaks.
+
+## Interview notes
+
+The whole project in five answers:
+
+1. **Core design** — a hash map gives O(1) *lookup*, a doubly linked list gives
+   O(1) *reorder/eviction*; neither alone does both. Two dummy sentinel nodes
+   remove all empty-list / first-node / last-node edge cases.
+2. **A read isn't passive** — under LRU, `get` moves the node to the front.
+   That is what "recently *used*" means, and it changes which key is evicted
+   next. Leave it in place and it would drift to the back and be wrongly evicted.
+3. **LRU vs FIFO** — one guarded `if` apart. FIFO evicts by insertion *age*, LRU
+   by *recency of use*. On a hot-key workload this project measures 100% vs 50%:
+   LRU protects reused keys, FIFO keeps evicting them. LRU wins under temporal
+   locality; FIFO ties on no-reuse scans and is cheaper (never reorders).
+4. **Generics** — `Cache<K, V>` is a template. `get` returns `std::optional<V>`
+   rather than a `-1` sentinel, because `V` can be any type. `K` must be
+   hashable and both `K`/`V` default-constructible (for the sentinels).
+5. **Memory** — every `new` has a matching `delete`: eviction frees victims,
+   `~Cache()` frees survivors. No leaks.
+
+Likely follow-up — *"how would you add another policy?"* Same structure;
+parameterize the reorder-on-use step (that is exactly how FIFO was added).
