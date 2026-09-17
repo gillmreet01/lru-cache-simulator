@@ -1,0 +1,15 @@
+# Sample workload for the cache simulator.
+# Format: `cap N` sets capacity; `put KEY VALUE` and `get KEY` are operations.
+# Blank lines and lines starting with '#' are ignored.
+# This trace has a "hot" key (1) that is read repeatedly, so LRU beats FIFO.
+
+cap 3
+
+put 1 10
+put 2 20
+put 3 30
+get 1
+put 4 40
+get 1
+get 1
+get 3

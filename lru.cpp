@@ -1,6 +1,9 @@
 #include <iostream>
 #include <unordered_map>
 #include <string>
+#include <vector>
+#include <fstream>
+#include <sstream>
 using namespace std;
 
 // Eviction policy. LRU moves a node to the front whenever it is used;
@@ -138,7 +141,16 @@ public:
     }
 };
 
-// Helper for the demo: run a get and print HIT/MISS with the value.
+// One parsed operation. type 'p' = put (uses key+value), 'g' = get (uses key).
+// We parse the whole workload into a list of these so it can be REPLAYED
+// through more than one cache (a file stream can only be read once).
+struct Op {
+    char type;
+    int key;
+    int value;
+};
+
+// Run a get and print HIT/MISS with the value.
 void tryGet(Cache& cache, int key) {
     int v = cache.get(key);
     if (v == -1)
@@ -147,38 +159,96 @@ void tryGet(Cache& cache, int key) {
         cout << "  get(" << key << ")  -> HIT (" << v << ")\n";
 }
 
-// The SAME sequence of operations, run against whichever cache is passed in.
-// Key 1 is "hot": inserted, then accessed repeatedly. Key 4 forces an eviction.
-void runWorkload(Cache& cache) {
-    cache.put(1, 10);  cout << "  put(1,10)\n";
-    cache.put(2, 20);  cout << "  put(2,20)\n";
-    cache.put(3, 30);  cout << "  put(3,30)   [cache full]\n";
-    tryGet(cache, 1);              // touch the hot key before the eviction
-    cache.put(4, 40);  cout << "  put(4,40)   [triggers one eviction]\n";
-    tryGet(cache, 1);              // hot key again
-    tryGet(cache, 1);              // and again
-    tryGet(cache, 3);
+// Execute a parsed workload against one cache, printing each step.
+void runOps(Cache& cache, const vector<Op>& ops) {
+    for (const Op& op : ops) {
+        if (op.type == 'p') {
+            cache.put(op.key, op.value);
+            cout << "  put(" << op.key << "," << op.value << ")\n";
+        } else {
+            tryGet(cache, op.key);
+        }
+    }
 }
 
-int main() {
-    cout << "Workload (capacity 3): put 1,2,3; get 1; put 4; get 1; get 1; get 3\n";
-    cout << "Key 1 is 'hot' - accessed repeatedly after insertion.\n";
+// Built-in workload used when no file is given. Key 1 is "hot" (read repeatedly).
+vector<Op> defaultOps() {
+    return { {'p',1,10}, {'p',2,20}, {'p',3,30}, {'g',1,0},
+             {'p',4,40}, {'g',1,0}, {'g',1,0}, {'g',3,0} };
+}
 
-    Cache lru(3, Policy::LRU, "LRU");
+// Parse a workload file into `ops`, updating `capacity` if a `cap` line is seen.
+// Format (one directive per line): `cap N`, `put KEY VALUE`, `get KEY`.
+// Blank lines and lines starting with '#' are ignored. Returns false if the
+// file can't be opened.
+bool loadOps(const string& path, vector<Op>& ops, int& capacity) {
+    ifstream in(path);
+    if (!in) return false;
+
+    string line;
+    while (getline(in, line)) {
+        istringstream iss(line);
+        string cmd;
+        if (!(iss >> cmd)) continue;        // blank / whitespace-only line
+        if (cmd[0] == '#') continue;        // comment
+
+        if (cmd == "cap") {
+            iss >> capacity;
+        } else if (cmd == "put") {
+            int k, v;
+            iss >> k >> v;
+            ops.push_back({'p', k, v});
+        } else if (cmd == "get") {
+            int k;
+            iss >> k;
+            ops.push_back({'g', k, 0});
+        } else {
+            cerr << "  (skipping unknown command: " << cmd << ")\n";
+        }
+    }
+    return true;
+}
+
+int main(int argc, char* argv[]) {
+    int capacity = 3;
+    vector<Op> ops;
+    string source;
+
+    if (argc > 1) {
+        // File-driven: read the workload from the given path.
+        if (!loadOps(argv[1], ops, capacity)) {
+            cerr << "Error: could not open workload file '" << argv[1] << "'\n";
+            return 1;
+        }
+        source = argv[1];
+    } else {
+        // No file given: fall back to the built-in demo workload.
+        ops = defaultOps();
+        source = "built-in demo (pass a file path to use your own)";
+    }
+
+    cout << "Workload source: " << source << "\n";
+    cout << "Capacity: " << capacity << ", operations: " << ops.size() << "\n";
+
+    Cache lru(capacity, Policy::LRU, "LRU");
     cout << "\n=== LRU policy ===\n";
-    runWorkload(lru);
+    runOps(lru, ops);
     lru.printStats();
 
-    Cache fifo(3, Policy::FIFO, "FIFO");
+    Cache fifo(capacity, Policy::FIFO, "FIFO");
     cout << "\n=== FIFO policy ===\n";
-    runWorkload(fifo);
+    runOps(fifo, ops);
     fifo.printStats();
 
     cout << "\n--- Comparison ---\n";
     cout << "LRU  hit ratio: " << lru.hitRatio() * 100 << "%\n";
     cout << "FIFO hit ratio: " << fifo.hitRatio() * 100 << "%\n";
     if (lru.hitRatio() > fifo.hitRatio())
-        cout << "LRU wins: it keeps the hot key 1 (recently used), while FIFO\n"
-             << "evicts key 1 purely for being oldest - then keeps missing it.\n";
+        cout << "LRU wins on this workload: it keeps recently-used keys, while\n"
+             << "FIFO evicts purely by insertion age.\n";
+    else if (fifo.hitRatio() > lru.hitRatio())
+        cout << "FIFO wins on this workload.\n";
+    else
+        cout << "Both policies tie on this workload.\n";
     return 0;
 }

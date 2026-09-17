@@ -68,17 +68,48 @@ Dynamic linking is broken on my machine, so build statically:
 
 ```bash
 g++ -std=c++17 -static lru.cpp -o lru
-./lru
+./lru                # runs the built-in demo workload
+./lru workload.txt   # runs your own workload from a file
+```
+
+## Workload files
+
+Instead of the built-in demo, you can drive the simulator from a text file and
+compare LRU vs FIFO on your own access trace. Format (one directive per line):
+
+| Line          | Meaning                                        |
+|---------------|------------------------------------------------|
+| `cap N`       | Set the cache capacity to `N`.                 |
+| `put KEY VAL` | Insert or update `KEY` with value `VAL`.       |
+| `get KEY`     | Look up `KEY` (counts as a hit or a miss).     |
+| `# ...`       | Comment — ignored. Blank lines ignored too.    |
+
+The workload is parsed into a list of operations once, then replayed through
+both an LRU and a FIFO cache so the comparison is apples-to-apples. See
+[`workload.txt`](workload.txt) for an example:
+
+```
+cap 3
+put 1 10
+put 2 20
+put 3 30
+get 1
+put 4 40
+get 1
+get 1
+get 3
 ```
 
 ## Sample output
 
-The same workload (key 1 is "hot" — read repeatedly) run through both policies:
+Running `./lru workload.txt` (key 1 is "hot" — read repeatedly) through both
+policies:
 
 ![Demo run comparing LRU and FIFO](demo.png)
 
 ```
-Workload (capacity 3): put 1,2,3; get 1; put 4; get 1; get 1; get 3
+Workload source: workload.txt
+Capacity: 3, operations: 8
 
 === LRU policy ===   -> Hits: 4  Misses: 0  Hit ratio: 100%
 === FIFO policy ===  -> Hits: 2  Misses: 2  Hit ratio: 50%
