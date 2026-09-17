@@ -1,10 +1,11 @@
-# LRU Cache Simulator (C++)
+# Cache Simulator — LRU vs FIFO (C++)
 
-A small CPU-cache simulator that implements the **LRU (Least Recently Used)**
-eviction policy in **O(1)** time for both `get` and `put`. It tracks hits,
-misses, and the final hit ratio.
+A small CPU-cache simulator with **O(1)** `get` and `put`, supporting two
+eviction policies — **LRU (Least Recently Used)** and **FIFO (First In, First
+Out)** — so you can run the same workload through both and compare hit ratios.
+It tracks hits, misses, and the final hit ratio.
 
-This is the same design as the classic LeetCode problem
+The LRU design is the same as the classic LeetCode problem
 [#146 "LRU Cache"](https://leetcode.com/problems/lru-cache/).
 
 ## The idea
@@ -26,15 +27,40 @@ Together: the hash map gives O(1) **lookup**, the linked list gives O(1)
 Two dummy **sentinel** nodes (`head`, `tail`) bracket the list so insertion and
 removal never need special cases for an empty list or the first/last node.
 
+## LRU vs FIFO
+
+Both policies share the exact same structure and evict the node just before
+`tail`. The **only** difference is what happens when a key is *used*:
+
+- **LRU** — a `get` (or a `put` on an existing key) moves that node to the
+  front, so order reflects *recency of use*. The victim is the least recently
+  used key.
+- **FIFO** — using a key does **nothing** to the order, so order reflects
+  *insertion time*. The victim is the oldest inserted key, even if it was just
+  read.
+
+In code that difference is a single guarded branch:
+
+```cpp
+if (policy == Policy::LRU) { remove(node); addToFront(node); }
+```
+
+FIFO ties LRU on a no-reuse scan and is cheaper (never reorders), but on
+workloads with reused "hot" keys, LRU keeps them and FIFO keeps evicting them —
+which is why LRU is the usual default. The demo below shows LRU at 100% vs
+FIFO at 50% on the same sequence.
+
 ## Operations
 
-| Method              | What it does                                                         |
-|---------------------|---------------------------------------------------------------------|
-| `put(key, value)`   | Insert/update a key. If full, evict the LRU node first.             |
-| `get(key)`          | Return the value (a **hit**) or `-1` (a **miss**); marks key as MRU. |
-| `printStats()`      | Print hit count, miss count, and hit ratio.                         |
+| Method              | What it does                                                          |
+|---------------------|----------------------------------------------------------------------|
+| `Cache(cap, policy, name)` | Construct a cache with `Policy::LRU` or `Policy::FIFO`.        |
+| `put(key, value)`   | Insert/update a key. If full, evict the victim first.                |
+| `get(key)`          | Return the value (a **hit**) or `-1` (a **miss**).                    |
+| `hitRatio()`        | Hits / total accesses, as a fraction.                                |
+| `printStats()`      | Print hit count, miss count, and hit ratio.                          |
 
-Every `get`/`put` on an existing key marks it most-recently-used.
+Under LRU, every `get`/`put` on an existing key marks it most-recently-used.
 
 ## Build & run
 
@@ -47,29 +73,22 @@ g++ -std=c++17 -static lru.cpp -o lru
 
 ## Sample output
 
-![Demo run of the LRU cache simulator](demo.png)
+The same workload (key 1 is "hot" — read repeatedly) run through both policies:
+
+![Demo run comparing LRU and FIFO](demo.png)
 
 ```
-Cache created with capacity 3.
+Workload (capacity 3): put 1,2,3; get 1; put 4; get 1; get 1; get 3
 
-put(1,10)
-put(2,20)
-put(3,30)   [cache full: 3,2,1]
-get(1)  -> HIT (10)
-put(4,40)   [evicts key 2, the LRU]
-get(2)  -> MISS
-get(3)  -> HIT (30)
-get(4)  -> HIT (40)
-
---- Cache Stats ---
-Hits:   3
-Misses: 1
-Hit ratio: 75%
+=== LRU policy ===   -> Hits: 4  Misses: 0  Hit ratio: 100%
+=== FIFO policy ===  -> Hits: 2  Misses: 2  Hit ratio: 50%
 ```
 
-Note the key moment: `get(1)` moves key 1 to the front, so key **2** becomes the
-least-recently-used and is the one evicted by `put(4,40)`. Without that access,
-key 1 would have been evicted instead — a read changes eviction order.
+Why they diverge: after `put 1,2,3` the order is `[3,2,1]`, so key 1 is oldest.
+The `get(1)` moves key 1 to the front **under LRU only**. So `put(4,40)` evicts
+key 2 under LRU (keeping the hot key 1) but evicts key 1 under FIFO (oldest) —
+after which the repeated `get(1)` calls hit under LRU and miss under FIFO.
+A read changes eviction order under LRU; under FIFO it never does.
 
 ## Complexity
 
@@ -82,5 +101,5 @@ key 1 would have been evicted instead — a read changes eviction order.
 ## Memory
 
 Every `new` has a matching `delete`: evicted nodes are freed in `put`, and the
-destructor `~LRUCache()` frees all survivors (including sentinels) at shutdown,
+destructor `~Cache()` frees all survivors (including sentinels) at shutdown,
 so nothing leaks.
