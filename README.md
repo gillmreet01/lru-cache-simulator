@@ -47,6 +47,8 @@ g++ -std=c++17 -static lru.cpp -o lru
 
 ## Sample output
 
+![Demo run of the LRU cache simulator](demo.png)
+
 ```
 Cache created with capacity 3.
 
